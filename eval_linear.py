@@ -69,7 +69,7 @@ def main():
     # data loading code
     traindir = os.path.join(args.data, 'train')
     valdir = os.path.join(args.data, 'val')
-
+    '''
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
@@ -91,15 +91,16 @@ def main():
                              transforms.RandomHorizontalFlip(),
                              transforms.ToTensor(),
                              normalize]
-    train_dataset = datasets.ImageFolder(
-        traindir,
-        transform=transforms.Compose(transformations_train)
-    )
+    '''
+    transformations_train = [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+    transformations_val = transformations_train
+    train_dataset = datasets.CIFAR10(root='./data', train=True,
+                                            download=False, transform=transforms.Compose(transformations_train))
 
-    val_dataset = datasets.ImageFolder(
-        valdir,
-        transform=transforms.Compose(transformations_val)
-    )
+    val_dataset = datasets.CIFAR10(root='./data', train=False,
+                                           download=True, transform=transforms.Compose(transformations_val))
+
+
     train_loader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=True,
@@ -233,7 +234,7 @@ def train(train_loader, model, reglog, criterion, optimizer, epoch):
         #adjust learning rate
         learning_rate_decay(optimizer, len(train_loader) * epoch + i, args.lr)
 
-        target = target.cuda(async=True)
+        target = target.cuda(non_blocking=True)
         input_var = torch.autograd.Variable(input.cuda())
         target_var = torch.autograd.Variable(target)
         # compute output
@@ -243,7 +244,7 @@ def train(train_loader, model, reglog, criterion, optimizer, epoch):
         loss = criterion(output, target_var)
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-        losses.update(loss.data[0], input.size(0))
+        losses.update(loss.item(), input.size(0))
         top1.update(prec1[0], input.size(0))
         top5.update(prec5[0], input.size(0))
 
@@ -281,14 +282,14 @@ def validate(val_loader, model, reglog, criterion):
         if args.tencrops:
             bs, ncrops, c, h, w = input_tensor.size()
             input_tensor = input_tensor.view(-1, c, h, w)
-        target = target.cuda(async=True)
+        target = target.cuda(non_blocking=True)
         input_var = torch.autograd.Variable(input_tensor.cuda(), volatile=True)
         target_var = torch.autograd.Variable(target, volatile=True)
 
         output = reglog(forward(input_var, model, reglog.conv))
 
         if args.tencrops:
-            output_central = output.view(bs, ncrops, -1)[: , ncrops / 2 - 1, :]
+            output_central = output.view(bs, ncrops, -1)[: , ncrops // 2 - 1, :]
             output = softmax(output)
             output = torch.squeeze(output.view(bs, ncrops, -1).mean(1))
         else:
@@ -298,7 +299,7 @@ def validate(val_loader, model, reglog, criterion):
         top1.update(prec1[0], input_tensor.size(0))
         top5.update(prec5[0], input_tensor.size(0))
         loss = criterion(output_central, target_var)
-        losses.update(loss.data[0], input_tensor.size(0))
+        losses.update(loss.item(), input_tensor.size(0))
 
         # measure elapsed time
         batch_time.update(time.time() - end)

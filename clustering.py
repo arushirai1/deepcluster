@@ -63,8 +63,8 @@ class ReassignedDataset(data.Dataset):
         Returns:
             tuple: (image, pseudolabel) where pseudolabel is the cluster of index datapoint
         """
-        path, pseudolabel = self.imgs[index]
-        img = pil_loader(path)
+        img, pseudolabel = self.imgs[index]
+        img = transforms.ToPILImage()(img).convert("RGB") #pil_loader(path)
         if self.transform is not None:
             img = self.transform(img)
         return img, pseudolabel
@@ -176,7 +176,11 @@ def run_kmeans(x, nmb_clusters, verbose=False):
     # perform the training
     clus.train(x, index)
     _, I = index.search(x, 1)
-    losses = faiss.vector_to_array(clus.obj)
+    
+    stats = clus.iteration_stats
+    losses = np.array([
+        stats.at(i).obj for i in range(stats.size())
+    ])
     if verbose:
         print('k-means loss evolution: {0}'.format(losses))
 

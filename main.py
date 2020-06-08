@@ -25,6 +25,7 @@ import clustering
 import models
 from util import AverageMeter, Logger, UnifLabelSampler
 
+import sys
 
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch Implementation of DeepCluster')
@@ -61,6 +62,8 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=31, help='random seed (default: 31)')
     parser.add_argument('--exp', type=str, default='', help='path to exp folder')
     parser.add_argument('--verbose', action='store_true', help='chatty')
+    parser.add_argument('--cifar',type=int, default=1, help='using cifar?')
+
     return parser.parse_args()
 
 
@@ -97,11 +100,15 @@ def main(args):
             print("=> loading checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume)
             args.start_epoch = checkpoint['epoch']
+            state_dict=checkpoint['state_dict'].copy()
+            to_delete=[]
             # remove top_layer parameters from checkpoint
-            for key in checkpoint['state_dict']:
+            for key in state_dict:
                 if 'top_layer' in key:
-                    del checkpoint['state_dict'][key]
-            model.load_state_dict(checkpoint['state_dict'])
+                    to_delete.append(key)
+            for key in to_delete:
+                del state_dict[key]
+            model.load_state_dict(state_dict)
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.resume, checkpoint['epoch']))
@@ -126,7 +133,11 @@ def main(args):
 
     # load the data
     end = time.time()
-    dataset = datasets.ImageFolder(args.data, transform=transforms.Compose(tra))
+    if args.cifar:
+        dataset = datasets.CIFAR10(root='./data', train=True,
+                                                download=False, transform=transforms.Compose(tra))
+    else:
+        dataset = datasets.ImageFolder(args.data, transform=transforms.Compose(tra))
     if args.verbose:
         print('Load dataset: {0:.2f} s'.format(time.time() - end))
 
@@ -158,7 +169,7 @@ def main(args):
         if args.verbose:
             print('Assign pseudo labels')
         train_dataset = clustering.cluster_assign(deepcluster.images_lists,
-                                                  dataset.imgs)
+                                                  dataset)#.imgs)
 
         # uniformly sample per target
         sampler = UnifLabelSampler(int(args.reassign * len(train_dataset)),
@@ -259,7 +270,7 @@ def train(loader, model, crit, opt, epoch):
                 'optimizer' : opt.state_dict()
             }, path)
 
-        target = target.cuda(async=True)
+        target = target.cuda(non_blocking=True)
         input_var = torch.autograd.Variable(input_tensor.cuda())
         target_var = torch.autograd.Variable(target)
 
@@ -267,7 +278,7 @@ def train(loader, model, crit, opt, epoch):
         loss = crit(output, target_var)
 
         # record loss
-        losses.update(loss.data[0], input_tensor.size(0))
+        losses.update(loss.item(), input_tensor.size(0))
 
         # compute gradient and do SGD step
         opt.zero_grad()
@@ -298,9 +309,12 @@ def compute_features(dataloader, model, N):
     model.eval()
     # discard the label information in the dataloader
     for i, (input_tensor, _) in enumerate(dataloader):
-        input_var = torch.autograd.Variable(input_tensor.cuda(), volatile=True)
+        torch.no_grad()
+        input_var = torch.autograd.Variable(input_tensor.cuda())#, volatile=True)
+        s_aux=time.time()
+        #print(i, s_aux)
         aux = model(input_var).data.cpu().numpy()
-
+        #print(i, time.time()-s_aux)
         if i == 0:
             features = np.zeros((N, aux.shape[1]), dtype='float32')
 
@@ -324,4 +338,10 @@ def compute_features(dataloader, model, N):
 
 if __name__ == '__main__':
     args = parse_args()
+    old_stdout = sys.stdout
+    log_file = open("message.log","w")
+
+    sys.stdout = log_file
     main(args)
+    sys.stdout = old_stdout
+    log_file.close()
